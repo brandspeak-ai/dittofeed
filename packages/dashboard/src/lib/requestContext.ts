@@ -9,6 +9,7 @@ import {
   RequestContextErrorType as BackendRequestContextErrorType,
 } from "backend-lib/src/types";
 import {
+  MULTI_TENANT_LOGIN_PAGE,
   SINGLE_TENANT_LOGIN_PAGE,
   UNAUTHORIZED_PAGE,
 } from "isomorphic-lib/src/constants";
@@ -86,6 +87,14 @@ export const requestContext: <T>(
             return {
               redirect: {
                 destination: SINGLE_TENANT_LOGIN_PAGE,
+                permanent: false,
+              },
+            };
+          }
+          if (backendConfig().authMode === "multi-tenant") {
+            return {
+              redirect: {
+                destination: MULTI_TENANT_LOGIN_PAGE,
                 permanent: false,
               },
             };
