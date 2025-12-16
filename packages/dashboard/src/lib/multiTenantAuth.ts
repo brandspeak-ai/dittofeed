@@ -77,6 +77,14 @@ export interface UserInfoResponse {
     name: string;
     role: string;
   }[];
+  // Hub client context for multi-tenant workspace resolution
+  client_id?: string;
+  client_name?: string;
+  role?: string; // Hub role (admin, manager, editor, viewer)
+  external_mappings?: {
+    dittofeed?: { workspace_id: string };
+    postiz?: { organization_id: string };
+  };
 }
 
 // Token response from OAuth provider
@@ -148,6 +156,9 @@ export interface OpenIdProfile {
   picture?: string;
   name?: string;
   nickname?: string;
+  // Hub claims for client-centric multi-tenancy
+  client_id?: string;
+  hub_role?: string;
 }
 
 // Generate a JWT token with OpenIdProfile claims
@@ -177,6 +188,9 @@ export function userInfoToOpenIdProfile(
     email_verified: true, // Assume verified if they went through brandspeak-hub auth
     name: userInfo.name,
     nickname: userInfo.name?.split(" ")[0], // Use first name as nickname
+    // Hub claims for client-centric workspace resolution
+    client_id: userInfo.client_id,
+    hub_role: userInfo.role,
   };
 }
 

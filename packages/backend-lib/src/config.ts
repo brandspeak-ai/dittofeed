@@ -67,6 +67,8 @@ const BaseRawConfigProps = {
   enableSourceControl: Type.Optional(BoolStr),
   sourceControlProvider: Type.Optional(SourceControlProvider),
   oidcTokenPublicKey: Type.Optional(Type.String()),
+  // Hub integration - auto-create workspace member roles when client_id is present in token
+  hubWorkspaceAutoCreate: Type.Optional(BoolStr),
   authMode: Type.Optional(AuthMode),
   authProvider: Type.Optional(Type.String()),
   oauthStartUrl: Type.Optional(Type.String()),
@@ -278,6 +280,8 @@ export type Config = Overwrite<
     enableSourceControl: boolean;
     exportLogsHyperDx: boolean;
     enableColdStorage: boolean;
+    // Hub integration - auto-create workspace member roles when client_id is present in token
+    hubWorkspaceAutoCreate: boolean;
     globalCronTaskQueue: string;
     googleOps: boolean;
     kafkaBrokers: string[];
@@ -633,6 +637,8 @@ function parseRawConfig(rawConfig: RawConfig): Config {
     enableBlobStorage: rawConfig.enableBlobStorage === "true",
     // Gate cold storage behavior (default false)
     enableColdStorage,
+    // Hub integration - auto-create workspace member roles when client_id is present in token
+    hubWorkspaceAutoCreate: rawConfig.hubWorkspaceAutoCreate === "true",
     // Endpoint used by Node AWS SDK clients (host-accessible)
     blobStorageEndpoint,
     // Internal endpoint used by ClickHouse (container-accessible)

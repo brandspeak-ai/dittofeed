@@ -4846,6 +4846,44 @@ export const DeleteAdminApiKeyRequest = Type.Object({
 
 export type DeleteAdminApiKeyRequest = Static<typeof DeleteAdminApiKeyRequest>;
 
+// Hub Workspace Provisioning - Used by BrandSpeak Hub to create child workspaces
+export const CreateWorkspaceFromHubRequest = Type.Object({
+  name: Type.String({ description: "Workspace name (display name)" }),
+  externalId: Type.String({
+    description: "Hub client_id UUID (used for uniqueness)",
+  }),
+  adminEmail: Type.Optional(
+    Type.String({ description: "Admin email for initial setup" }),
+  ),
+  settings: Type.Optional(
+    Type.Object({
+      timezone: Type.Optional(Type.String()),
+    }),
+  ),
+});
+
+export type CreateWorkspaceFromHubRequest = Static<
+  typeof CreateWorkspaceFromHubRequest
+>;
+
+export const CreateWorkspaceFromHubResponse = Type.Object({
+  id: Type.String(),
+  externalId: Type.String(),
+  name: Type.String(),
+  writeKey: Type.String(),
+  createdAt: Type.String(),
+  status: Type.String(),
+  _existed: Type.Optional(
+    Type.Boolean({
+      description: "True if workspace already existed (idempotent)",
+    }),
+  ),
+});
+
+export type CreateWorkspaceFromHubResponse = Static<
+  typeof CreateWorkspaceFromHubResponse
+>;
+
 export enum JourneyConstraintViolationType {
   WaitForNodeAndEventEntryNode = "WaitForNodeAndEventEntryNode",
   KeyedPerformedSegmentEntryNode = "KeyedPerformedSegmentEntryNode",

@@ -234,6 +234,9 @@ export const OpenIdProfile = Type.Object({
   picture: Type.Optional(Type.String()),
   name: Type.Optional(Type.String()),
   nickname: Type.Optional(Type.String()),
+  // Hub claims for client-centric multi-tenancy
+  client_id: Type.Optional(Type.String()),
+  hub_role: Type.Optional(Type.String()),
 });
 
 export type OpenIdProfile = Static<typeof OpenIdProfile>;

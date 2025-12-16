@@ -37,6 +37,21 @@ import { isProfileEmailVerified } from "./openIdProfile";
 
 export const SESSION_KEY = "df-session-key";
 
+// Role mapping: Hub role → Dittofeed role
+// admin, manager, editor → Admin (full access)
+// viewer → Viewer (read-only)
+function mapHubRoleToDittofeed(hubRole?: string): "Admin" | "Viewer" {
+  switch (hubRole) {
+    case "admin":
+    case "manager":
+    case "editor":
+      return "Admin";
+    case "viewer":
+    default:
+      return "Viewer";
+  }
+}
+
 interface RolesWithWorkspace {
   workspace:
     | (WorkspaceResource & {
@@ -346,11 +361,99 @@ export async function getMultiTenantRequestContext({
   }
 
   const { workspace, memberRoles } = await findAndCreateRoles(member);
-  if (workspace !== null && workspace.status !== WorkspaceStatusDbEnum.Active) {
+
+  // If profile has client_id from Hub, prioritize workspace by externalId
+  let resolvedWorkspace = workspace;
+  let resolvedMemberRoles = memberRoles;
+  const { hubWorkspaceAutoCreate } = config();
+
+  if (profile.client_id) {
+    logger().debug(
+      { clientId: profile.client_id, hubRole: profile.hub_role, hubWorkspaceAutoCreate },
+      "Hub client_id present, attempting workspace lookup by externalId",
+    );
+
+    const workspaceByExternalId = await db().query.workspace.findFirst({
+      where: and(
+        eq(dbWorkspace.externalId, profile.client_id),
+        eq(dbWorkspace.status, WorkspaceStatusDbEnum.Active),
+      ),
+    });
+
+    if (workspaceByExternalId) {
+      logger().debug(
+        {
+          workspaceId: workspaceByExternalId.id,
+          workspaceName: workspaceByExternalId.name,
+          clientId: profile.client_id,
+        },
+        "Found workspace by externalId (Hub client_id)",
+      );
+
+      // Check if member has role in this workspace
+      const existingRole = memberRoles.find(
+        (r) => r.workspaceId === workspaceByExternalId.id,
+      );
+
+      if (!existingRole && hubWorkspaceAutoCreate) {
+        // Auto-create role based on Hub role mapping (only if feature flag is enabled)
+        const dittofeedRole = mapHubRoleToDittofeed(profile.hub_role);
+        logger().info(
+          {
+            workspaceId: workspaceByExternalId.id,
+            memberId: member.id,
+            hubRole: profile.hub_role,
+            dittofeedRole,
+          },
+          "Auto-creating member role for Hub workspace",
+        );
+
+        await db()
+          .insert(dbWorkspaceMemberRole)
+          .values({
+            workspaceId: workspaceByExternalId.id,
+            workspaceMemberId: member.id,
+            role: dittofeedRole,
+          })
+          .onConflictDoNothing();
+
+        resolvedMemberRoles = [
+          ...memberRoles,
+          {
+            workspaceId: workspaceByExternalId.id,
+            workspaceName: workspaceByExternalId.name,
+            workspaceMemberId: member.id,
+            role: dittofeedRole,
+          },
+        ];
+      } else if (!existingRole) {
+        logger().debug(
+          {
+            workspaceId: workspaceByExternalId.id,
+            memberId: member.id,
+            hubWorkspaceAutoCreate,
+          },
+          "Skipping auto-creation of member role (feature flag disabled or role exists)",
+        );
+      }
+
+      resolvedWorkspace = workspaceByExternalId;
+    } else {
+      logger().debug(
+        { clientId: profile.client_id },
+        "No workspace found for Hub client_id, falling back to standard resolution",
+      );
+    }
+  }
+
+  if (
+    resolvedWorkspace !== null &&
+    resolvedWorkspace.status !== WorkspaceStatusDbEnum.Active
+  ) {
     return err({
       type: RequestContextErrorType.WorkspaceInactive,
       message: "Workspace is not active",
-      workspace,
+      workspace: resolvedWorkspace,
     });
   }
   const memberResouce: WorkspaceMemberResource = {
@@ -363,24 +466,24 @@ export async function getMultiTenantRequestContext({
     createdAt: member.createdAt.toISOString(),
   };
 
-  if (!workspace) {
+  if (!resolvedWorkspace) {
     return err({
       type: RequestContextErrorType.NotOnboarded,
       message: "User missing role",
       member: memberResouce,
-      memberRoles,
+      memberRoles: resolvedMemberRoles,
     } satisfies NotOnboardedError);
   }
 
   return ok({
     member: memberResouce,
     workspace: {
-      id: workspace.id,
-      name: workspace.name,
-      type: workspace.type,
-      parentWorkspaceId: workspace.parentWorkspaceId ?? undefined,
+      id: resolvedWorkspace.id,
+      name: resolvedWorkspace.name,
+      type: resolvedWorkspace.type,
+      parentWorkspaceId: resolvedWorkspace.parentWorkspaceId ?? undefined,
     },
-    memberRoles,
+    memberRoles: resolvedMemberRoles,
   });
 }
 

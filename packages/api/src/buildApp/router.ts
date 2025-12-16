@@ -29,6 +29,7 @@ import userPropertiesController from "../controllers/userPropertiesController";
 import userPropertyIndexController from "../controllers/userPropertyIndexController";
 import usersController from "../controllers/usersController";
 import webhooksController from "../controllers/webhooksController";
+import workspacesAdminController from "../controllers/workspacesAdminController";
 import { BuildAppOpts } from "../types";
 import adminAuth from "./adminAuth";
 import requestContext from "./requestContext";
@@ -133,6 +134,8 @@ export default async function router(
           prefix: "/computed-properties",
         }),
         f.register(analysisController, { prefix: "/analysis" }),
+        // Hub workspace provisioning API
+        f.register(workspacesAdminController, { prefix: "/workspaces" }),
       ]);
     },
     { prefix: "/api/admin" },
