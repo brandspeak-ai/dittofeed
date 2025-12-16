@@ -4,6 +4,7 @@ import { DEFAULT_WRITE_KEY_NAME } from "backend-lib/src/constants";
 import { db } from "backend-lib/src/db";
 import { workspace as dbWorkspace } from "backend-lib/src/db/schema";
 import logger from "backend-lib/src/logger";
+import { createWorkspaceMemberRole } from "backend-lib/src/rbac";
 import { upsertSubscriptionGroup } from "backend-lib/src/subscriptionGroups";
 import { DittofeedFastifyInstance } from "backend-lib/src/types";
 import { and, eq } from "drizzle-orm";
@@ -138,11 +139,36 @@ export default async function workspacesAdminController(
           channel: ChannelType.Email,
         });
 
+        // 5. Create admin member if adminEmail provided
+        if (adminEmail) {
+          try {
+            await createWorkspaceMemberRole({
+              workspaceId: newWorkspace.id,
+              email: adminEmail,
+              role: "Admin",
+            });
+            logger().info(
+              {
+                workspaceId: newWorkspace.id,
+                adminEmail,
+              },
+              "Created admin member for Hub workspace",
+            );
+          } catch (e) {
+            // Log but don't fail workspace creation if member creation fails
+            logger().warn(
+              { error: e, workspaceId: newWorkspace.id, adminEmail },
+              "Failed to create admin member for Hub workspace",
+            );
+          }
+        }
+
         logger().info(
           {
             workspaceId: newWorkspace.id,
             externalId,
             parentWorkspaceId,
+            adminEmail,
           },
           "Created new workspace for Hub client",
         );
