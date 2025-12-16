@@ -34,6 +34,7 @@ import {
   WorkspaceTypeAppEnum,
 } from "./types";
 import { isProfileEmailVerified } from "./openIdProfile";
+import { provisionHubWorkspace } from "./workspaces/createWorkspace";
 
 export const SESSION_KEY = "df-session-key";
 
@@ -365,15 +366,25 @@ export async function getMultiTenantRequestContext({
   // If profile has client_id from Hub, prioritize workspace by externalId
   let resolvedWorkspace = workspace;
   let resolvedMemberRoles = memberRoles;
-  const { hubWorkspaceAutoCreate } = config();
+  const {
+    hubWorkspaceAutoCreate,
+    hubAutoProvisionOnLogin,
+    hubDefaultParentWorkspaceId,
+  } = config();
 
   if (profile.client_id) {
     logger().debug(
-      { clientId: profile.client_id, hubRole: profile.hub_role, hubWorkspaceAutoCreate },
+      {
+        clientId: profile.client_id,
+        hubRole: profile.hub_role,
+        hubWorkspaceAutoCreate,
+        hubAutoProvisionOnLogin,
+        hubDefaultParentWorkspaceId: hubDefaultParentWorkspaceId ? "[set]" : "[not set]",
+      },
       "Hub client_id present, attempting workspace lookup by externalId",
     );
 
-    const workspaceByExternalId = await db().query.workspace.findFirst({
+    let workspaceByExternalId = await db().query.workspace.findFirst({
       where: and(
         eq(dbWorkspace.externalId, profile.client_id),
         eq(dbWorkspace.status, WorkspaceStatusDbEnum.Active),
@@ -381,10 +392,11 @@ export async function getMultiTenantRequestContext({
     });
 
     if (workspaceByExternalId) {
+      const foundWorkspace = workspaceByExternalId;
       logger().debug(
         {
-          workspaceId: workspaceByExternalId.id,
-          workspaceName: workspaceByExternalId.name,
+          workspaceId: foundWorkspace.id,
+          workspaceName: foundWorkspace.name,
           clientId: profile.client_id,
         },
         "Found workspace by externalId (Hub client_id)",
@@ -392,7 +404,7 @@ export async function getMultiTenantRequestContext({
 
       // Check if member has role in this workspace
       const existingRole = memberRoles.find(
-        (r) => r.workspaceId === workspaceByExternalId.id,
+        (r) => r.workspaceId === foundWorkspace.id,
       );
 
       if (!existingRole && hubWorkspaceAutoCreate) {
@@ -400,7 +412,7 @@ export async function getMultiTenantRequestContext({
         const dittofeedRole = mapHubRoleToDittofeed(profile.hub_role);
         logger().info(
           {
-            workspaceId: workspaceByExternalId.id,
+            workspaceId: foundWorkspace.id,
             memberId: member.id,
             hubRole: profile.hub_role,
             dittofeedRole,
@@ -408,6 +420,94 @@ export async function getMultiTenantRequestContext({
           "Auto-creating member role for Hub workspace",
         );
 
+        await db()
+          .insert(dbWorkspaceMemberRole)
+          .values({
+            workspaceId: foundWorkspace.id,
+            workspaceMemberId: member.id,
+            role: dittofeedRole,
+          })
+          .onConflictDoNothing();
+
+        resolvedMemberRoles = [
+          ...memberRoles,
+          {
+            workspaceId: foundWorkspace.id,
+            workspaceName: foundWorkspace.name,
+            workspaceMemberId: member.id,
+            role: dittofeedRole,
+          },
+        ];
+      } else if (!existingRole) {
+        logger().debug(
+          {
+            workspaceId: foundWorkspace.id,
+            memberId: member.id,
+            hubWorkspaceAutoCreate,
+          },
+          "Skipping auto-creation of member role (feature flag disabled or role exists)",
+        );
+      }
+
+      resolvedWorkspace = foundWorkspace;
+    } else if (hubAutoProvisionOnLogin && hubDefaultParentWorkspaceId) {
+      // Auto-provision workspace on first login (when enabled)
+      logger().info(
+        {
+          clientId: profile.client_id,
+          parentWorkspaceId: hubDefaultParentWorkspaceId,
+          memberEmail: member.email,
+        },
+        "Auto-provisioning Hub workspace on first login",
+      );
+
+      // Use client_id as both externalId and name (can be updated later)
+      const provisionResult = await provisionHubWorkspace({
+        name: profile.client_id,
+        externalId: profile.client_id,
+        parentWorkspaceId: hubDefaultParentWorkspaceId,
+        adminEmail: member.email ?? undefined,
+      });
+
+      if (provisionResult.isErr()) {
+        logger().error(
+          {
+            clientId: profile.client_id,
+            error: provisionResult.error,
+          },
+          "Failed to auto-provision Hub workspace",
+        );
+        return err({
+          type: RequestContextErrorType.NotOnboarded,
+          message: `Failed to auto-provision workspace for Hub client: ${profile.client_id}`,
+          member: {
+            id: member.id,
+            email: member.email,
+            emailVerified: member.emailVerified,
+            name: member.name ?? undefined,
+            nickname: member.nickname ?? undefined,
+            picture: member.image ?? undefined,
+            createdAt: member.createdAt.toISOString(),
+          },
+          memberRoles,
+        } satisfies NotOnboardedError);
+      }
+
+      workspaceByExternalId = provisionResult.value.workspace;
+      resolvedWorkspace = workspaceByExternalId;
+
+      logger().info(
+        {
+          workspaceId: workspaceByExternalId.id,
+          clientId: profile.client_id,
+          existed: provisionResult.value.existed,
+        },
+        "Hub workspace auto-provisioned successfully",
+      );
+
+      // Auto-create role for the user (they triggered the provision)
+      if (hubWorkspaceAutoCreate) {
+        const dittofeedRole = mapHubRoleToDittofeed(profile.hub_role);
         await db()
           .insert(dbWorkspaceMemberRole)
           .values({
@@ -426,25 +526,19 @@ export async function getMultiTenantRequestContext({
             role: dittofeedRole,
           },
         ];
-      } else if (!existingRole) {
-        logger().debug(
-          {
-            workspaceId: workspaceByExternalId.id,
-            memberId: member.id,
-            hubWorkspaceAutoCreate,
-          },
-          "Skipping auto-creation of member role (feature flag disabled or role exists)",
-        );
       }
-
-      resolvedWorkspace = workspaceByExternalId;
     } else {
-      // client_id present but workspace not found - reject instead of fallback
+      // client_id present but workspace not found and auto-provision disabled
       // Workspaces must be pre-provisioned via admin API; falling back to domain
       // lookup would be a security risk (user could access wrong workspace)
       logger().warn(
-        { clientId: profile.client_id, memberEmail: member.email },
-        "Hub client_id present but no workspace found - workspace must be provisioned first",
+        {
+          clientId: profile.client_id,
+          memberEmail: member.email,
+          hubAutoProvisionOnLogin,
+          hubDefaultParentWorkspaceId: hubDefaultParentWorkspaceId ? "[set]" : "[not set]",
+        },
+        "Hub client_id present but no workspace found - workspace must be provisioned first (auto-provision disabled or parent not configured)",
       );
       return err({
         type: RequestContextErrorType.NotOnboarded,

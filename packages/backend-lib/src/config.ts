@@ -69,6 +69,10 @@ const BaseRawConfigProps = {
   oidcTokenPublicKey: Type.Optional(Type.String()),
   // Hub integration - auto-create workspace member roles when client_id is present in token
   hubWorkspaceAutoCreate: Type.Optional(BoolStr),
+  // Hub integration - auto-provision workspace on first login if missing (default false)
+  hubAutoProvisionOnLogin: Type.Optional(BoolStr),
+  // Hub integration - parent workspace ID for auto-provisioned workspaces (required if hubAutoProvisionOnLogin=true)
+  hubDefaultParentWorkspaceId: Type.Optional(Type.String()),
   authMode: Type.Optional(AuthMode),
   authProvider: Type.Optional(Type.String()),
   oauthStartUrl: Type.Optional(Type.String()),
@@ -282,6 +286,10 @@ export type Config = Overwrite<
     enableColdStorage: boolean;
     // Hub integration - auto-create workspace member roles when client_id is present in token
     hubWorkspaceAutoCreate: boolean;
+    // Hub integration - auto-provision workspace on first login if missing
+    hubAutoProvisionOnLogin: boolean;
+    // Hub integration - parent workspace ID for auto-provisioned workspaces
+    hubDefaultParentWorkspaceId: string | undefined;
     globalCronTaskQueue: string;
     googleOps: boolean;
     kafkaBrokers: string[];
@@ -640,6 +648,10 @@ function parseRawConfig(rawConfig: RawConfig): Config {
     // Hub integration - auto-create workspace member roles when client_id is present in token
     // Defaults to true; set HUB_WORKSPACE_AUTO_CREATE=false to disable
     hubWorkspaceAutoCreate: rawConfig.hubWorkspaceAutoCreate !== "false",
+    // Hub integration - auto-provision workspace on first login if missing (default false)
+    hubAutoProvisionOnLogin: rawConfig.hubAutoProvisionOnLogin === "true",
+    // Hub integration - parent workspace ID for auto-provisioned workspaces
+    hubDefaultParentWorkspaceId: rawConfig.hubDefaultParentWorkspaceId,
     // Endpoint used by Node AWS SDK clients (host-accessible)
     blobStorageEndpoint,
     // Internal endpoint used by ClickHouse (container-accessible)
