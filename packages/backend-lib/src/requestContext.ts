@@ -439,10 +439,27 @@ export async function getMultiTenantRequestContext({
 
       resolvedWorkspace = workspaceByExternalId;
     } else {
-      logger().debug(
-        { clientId: profile.client_id },
-        "No workspace found for Hub client_id, falling back to standard resolution",
+      // client_id present but workspace not found - reject instead of fallback
+      // Workspaces must be pre-provisioned via admin API; falling back to domain
+      // lookup would be a security risk (user could access wrong workspace)
+      logger().warn(
+        { clientId: profile.client_id, memberEmail: member.email },
+        "Hub client_id present but no workspace found - workspace must be provisioned first",
       );
+      return err({
+        type: RequestContextErrorType.NotOnboarded,
+        message: `Workspace not provisioned for Hub client: ${profile.client_id}`,
+        member: {
+          id: member.id,
+          email: member.email,
+          emailVerified: member.emailVerified,
+          name: member.name ?? undefined,
+          nickname: member.nickname ?? undefined,
+          picture: member.image ?? undefined,
+          createdAt: member.createdAt.toISOString(),
+        },
+        memberRoles,
+      } satisfies NotOnboardedError);
     }
   }
 

@@ -638,7 +638,8 @@ function parseRawConfig(rawConfig: RawConfig): Config {
     // Gate cold storage behavior (default false)
     enableColdStorage,
     // Hub integration - auto-create workspace member roles when client_id is present in token
-    hubWorkspaceAutoCreate: rawConfig.hubWorkspaceAutoCreate === "true",
+    // Defaults to true; set HUB_WORKSPACE_AUTO_CREATE=false to disable
+    hubWorkspaceAutoCreate: rawConfig.hubWorkspaceAutoCreate !== "false",
     // Endpoint used by Node AWS SDK clients (host-accessible)
     blobStorageEndpoint,
     // Internal endpoint used by ClickHouse (container-accessible)
