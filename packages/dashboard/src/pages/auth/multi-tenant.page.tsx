@@ -9,6 +9,7 @@ import { useEffect, useState } from "react";
 import NavCard from "../../components/layout/drawer/drawerContent/navCard";
 import {
   AUTH_STATE_COOKIE,
+  AUTH_TOKEN_COOKIE,
   buildAuthorizationUrl,
   generateOAuthState,
   getStateCookieOptions,
@@ -32,6 +33,9 @@ export const getServerSideProps: GetServerSideProps<
     };
   }
 
+  // Check for error from OAuth callback (prevents redirect loop)
+  const errorFromCallback = ctx.query.error as string | undefined;
+
   try {
     // Generate OAuth state for CSRF protection
     const state = generateOAuthState();
@@ -46,15 +50,22 @@ export const getServerSideProps: GetServerSideProps<
       serialize(AUTH_STATE_COOKIE, state, cookieOptions),
     );
 
-    // Check if hub_auth_token cookie exists (from BrandSpeak Hub)
-    // If present, auto-redirect to OAuth flow
+    // Check if hub_auth_token cookie exists (from BrandSpeak Hub) OR ?auto=true query param
+    // If present AND no error from callback, auto-redirect to OAuth flow
+    // Don't auto-login if:
+    // 1. There was an error from callback (prevents redirect loop on OAuth error)
+    // 2. df_auth_token already exists (means OAuth succeeded but session check failed - prevents loop)
     const hubAuthToken = ctx.req.cookies?.hub_auth_token;
-    const autoLogin = !!hubAuthToken;
+    const dfAuthToken = ctx.req.cookies?.[AUTH_TOKEN_COOKIE];
+    const autoFromQuery = ctx.query.auto === "true";
+    const autoLogin =
+      (!!hubAuthToken || autoFromQuery) && !errorFromCallback && !dfAuthToken;
 
     return {
       props: {
         authorizationUrl,
         autoLogin,
+        ...(errorFromCallback && { error: errorFromCallback }),
       },
     };
   } catch (error) {
