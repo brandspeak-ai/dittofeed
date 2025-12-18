@@ -4,6 +4,7 @@ import backendConfig from "backend-lib/src/config";
 import { serialize } from "cookie";
 import { UNAUTHORIZED_PAGE } from "isomorphic-lib/src/constants";
 import { GetServerSideProps, NextPage } from "next";
+import { useEffect, useState } from "react";
 
 import NavCard from "../../components/layout/drawer/drawerContent/navCard";
 import {
@@ -16,6 +17,7 @@ import {
 interface MultiTenantAuthProps {
   authorizationUrl: string;
   error?: string;
+  autoLogin?: boolean;
 }
 
 export const getServerSideProps: GetServerSideProps<
@@ -44,9 +46,15 @@ export const getServerSideProps: GetServerSideProps<
       serialize(AUTH_STATE_COOKIE, state, cookieOptions),
     );
 
+    // Check if hub_auth_token cookie exists (from BrandSpeak Hub)
+    // If present, auto-redirect to OAuth flow
+    const hubAuthToken = ctx.req.cookies?.hub_auth_token;
+    const autoLogin = !!hubAuthToken;
+
     return {
       props: {
         authorizationUrl,
+        autoLogin,
       },
     };
   } catch (error) {
@@ -62,14 +70,47 @@ export const getServerSideProps: GetServerSideProps<
 };
 
 const MultiTenantAuth: NextPage<MultiTenantAuthProps> =
-  function MultiTenantAuth({ authorizationUrl, error }) {
+  function MultiTenantAuth({ authorizationUrl, error, autoLogin }) {
     const theme = useTheme();
+    const [isRedirecting, setIsRedirecting] = useState(false);
+
+    // Auto-redirect to OAuth flow if hub_auth_token cookie is present
+    useEffect(() => {
+      if (autoLogin && authorizationUrl && !error && !isRedirecting) {
+        setIsRedirecting(true);
+        // Small delay to ensure state cookie is set
+        setTimeout(() => {
+          window.location.href = authorizationUrl;
+        }, 100);
+      }
+    }, [autoLogin, authorizationUrl, error, isRedirecting]);
 
     const handleLogin = () => {
       if (authorizationUrl) {
         window.location.href = authorizationUrl;
       }
     };
+
+    // Show loading state during auto-redirect
+    if (isRedirecting) {
+      return (
+        <Stack
+          sx={{ width: "100%", height: "100vh" }}
+          alignItems="center"
+          justifyContent="center"
+          direction="column"
+          spacing={3}
+        >
+          <NavCard />
+          <Typography variant="h5" sx={{ fontWeight: 600 }}>
+            Signing you in...
+          </Typography>
+          <Typography variant="body2" color="text.secondary" textAlign="center">
+            Redirecting to BrandSpeak for authentication
+          </Typography>
+        </Stack>
+      );
+    }
 
     return (
       <Stack
