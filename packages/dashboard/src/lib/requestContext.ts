@@ -24,13 +24,28 @@ const backendConfig = backendConfigFromLib;
 const logger = backendLogger;
 const getRequestContext = getRequestContextFromLib;
 
+// Cookie name for auth token (must match multiTenantAuth.ts)
+const AUTH_TOKEN_COOKIE = "df_auth_token";
+
 export const requestContext: <T>(
   gssp: GetDFServerSideProps<PropsWithInitialState<T>>,
 ) => GetServerSideProps<PropsWithInitialState<T>> =
   (gssp) => async (context) => {
     // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
     const { profile } = context.req as { profile?: OpenIdProfile };
-    const rc = await getRequestContext(context.req.headers, profile);
+
+    // Next.js middleware modifies headers, but getServerSideProps receives
+    // the original browser request headers, not middleware-modified ones.
+    // So we need to read the cookie directly and construct the Authorization header.
+    const headers = { ...context.req.headers };
+    if (!headers.authorization) {
+      const token = context.req.cookies[AUTH_TOKEN_COOKIE];
+      if (token) {
+        headers.authorization = `Bearer ${token}`;
+      }
+    }
+
+    const rc = await getRequestContext(headers, profile);
     const { onboardingUrl } = backendConfig();
     if (rc.isErr()) {
       const { error } = rc;
@@ -158,7 +173,16 @@ export interface ApiRequestContextError {
 export async function apiAuth(
   req: NextApiRequest,
 ): Promise<Result<DFRequestContext, ApiRequestContextError>> {
-  const rc = await getRequestContext(req.headers, undefined);
+  // Same fix as SSR: read cookie directly if authorization header is missing
+  const headers = { ...req.headers };
+  if (!headers.authorization) {
+    const token = req.cookies[AUTH_TOKEN_COOKIE];
+    if (token) {
+      headers.authorization = `Bearer ${token}`;
+    }
+  }
+
+  const rc = await getRequestContext(headers, undefined);
 
   if (rc.isOk()) {
     return ok(rc.value);
